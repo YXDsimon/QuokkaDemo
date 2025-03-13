@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tween.js/18.6.4/tween.umd.js"></script>
+</head>
+<body>
+    <div style="display: flex; flex-direction: column; align-items: center;">
+        <canvas id="scene3d" width="400" height="300" style="border: 1px solid #ccc;"></canvas>
+        <div id="voiceStatus" style="margin-top: 10px; color: #666;">按住空格键说话</div>
+    </div>
+
+<script>
+// 3D场景相关变量
+let scene, camera, renderer, quokkaModel;
+let mixer; // 添加动画混合器变量
+
+// 语音控制相关变量
+let recognition = null;
+let isRecording = false;
+
+// 初始化3D场景
+function init3DScene() {
+    // 创建场景
+    scene = new THREE.Scene();
+    
+    // 创建渲染器
+    renderer = new THREE.WebGLRenderer({
+        canvas: document.getElementById('scene3d'),
+        antialias: true
+    });
+    renderer.setSize(400, 300);
+    renderer.setClearColor(0x87CEEB);  // 设置天空蓝色背景
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;  // 添加柔和阴影
+    
+    // 调整环境光
+    const ambientLight = new THREE.AmbientLight(0xffffff, 1.0);  // 增加环境光强度
+    scene.add(ambientLight);
+    
+    // 调整平行光
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 1.2);
+    directionalLight.position.set(5, 15, 5);
+    directionalLight.castShadow = true;
+    directionalLight.shadow.mapSize.width = 1024;
+    directionalLight.shadow.mapSize.height = 1024;
+    directionalLight.shadow.camera.near = 0.5;
+    directionalLight.shadow.camera.far = 50;
+    scene.add(directionalLight);
+    
+    // 添加草地
+    const textureLoader = new THREE.TextureLoader();
+    const grassTexture = textureLoader.load('https://threejs.org/examples/textures/terrain/grasslight-big.jpg', 
+        function(texture) {
+            texture.encoding = THREE.sRGBEncoding;  // 修正纹理颜色
+        }
+    );
+    grassTexture.wrapS = THREE.RepeatWrapping;
+    grassTexture.wrapT = THREE.RepeatWrapping;
+    grassTexture.repeat.set(8, 8);
+    
+    const groundGeometry = new THREE.PlaneGeometry(20, 20);
+    const groundMaterial = new THREE.MeshStandardMaterial({ 
+        map: grassTexture,
+        roughness: 0.6,  // 降低粗糙度
+        metalness: 0.0,  // 降低金属度
+        color: 0xffffff  // 添加白色基础色
+    });
+    const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+    ground.rotation.x = -Math.PI / 2;
+    ground.receiveShadow = true;
+    scene.add(ground);
+    
+    // 调整相机位置
+    camera = new THREE.PerspectiveCamera(75, 400/300, 0.1, 1000);
+    camera.position.set(0, 12, 16);  // 增加相机高度和距离
+    camera.lookAt(0, 0, 0);
+    
+    // 加载袋鼠模型
+    const loader = new THREE.GLTFLoader();
+    
+    // 创建一个Promise数组来加载所有模型
+    const modelPromises = [
+        'models/walking.glb',    // 走路动画
+        'models/confused.glb',   // 困惑动画
+        'models/dance.glb',      // 舞蹈动画1
+        'models/dance2.glb',     // 舞蹈动画2
+        'models/Happy_jump.glb', // 开心跳跃
+        'models/happy.glb',      // 开心动画
+        'models/lazy.glb',       // 懒散动画
+        'models/stand.glb'       // 站立动画
+    ].map(url => new Promise((resolve, reject) => {
+        loader.load(url, resolve, undefined, reject);
+    }));
+    
+    // 等待所有模型加载完成
+    Promise.all(modelPromises).then(models => {
+        const [walkingModel, confusedModel, danceModel, dance2Model, 
+               jumpModel, happyModel, lazyModel, standModel] = models;
+        
+        // 使用第一个模型（walking）作为主模型
+        quokkaModel = walkingModel.scene;
+        quokkaModel.scale.set(6, 6, 6);
+        quokkaModel.position.y = 0;
+        
+        // 设置阴影
+        quokkaModel.traverse((node) => {
+            if (node.isMesh) {
+                node.castShadow = true;
+            }
+        });
+        
+        // 设置动画混合器
+        mixer = new THREE.AnimationMixer(quokkaModel);
+        
+        // 创建动画动作
+        const walkAction = mixer.clipAction(walkingModel.animations[0]);
+        const confusedAction = mixer.clipAction(confusedModel.animations[0]);
+        const danceAction = mixer.clipAction(danceModel.animations[0]);
+        const dance2Action = mixer.clipAction(dance2Model.animations[0]);
+        const jumpAction = mixer.clipAction(jumpModel.animations[0]);
+        const happyAction = mixer.clipAction(happyModel.animations[0]);
+        const lazyAction = mixer.clipAction(lazyModel.animations[0]);
+        const standAction = mixer.clipAction(standModel.animations[0]);
+        
+        // 配置动画
+        walkAction.setLoop(THREE.LoopRepeat);
+        confusedAction.setLoop(THREE.LoopRepeat);
+        danceAction.setLoop(THREE.LoopRepeat);
+        dance2Action.setLoop(THREE.LoopRepeat);
+        jumpAction.setLoop(THREE.LoopOnce);
+        happyAction.setLoop(THREE.LoopRepeat);
+        lazyAction.setLoop(THREE.LoopRepeat);
+        standAction.setLoop(THREE.LoopRepeat);
+        
+        // 存储动画引用
+        quokkaModel.actions = {
+            walk: walkAction,
+            confused: confusedAction,
+            dance: danceAction,
+            dance2: dance2Action,
+            jump: jumpAction,
+            happy: happyAction,
+            lazy: lazyAction,
+            stand: standAction
+        };
+        
+        // 默认播放站立动画
+        standAction.play();
+        
+        scene.add(quokkaModel);
+    }).catch(error => {
+        console.error('模型加载出错:', error);
+    });
+    
+    // 修改动画循环函数
+    const clock = new THREE.Clock();
+    
+    function animate() {
+        requestAnimationFrame(animate);
+        
+        // 更新动画混合器
+        if (mixer) {
+            const delta = clock.getDelta();
+            mixer.update(delta);
+        }
+        
+        // 添加轻微的摆动效果
+        if (quokkaModel) {
+            // 使用正弦函数创建平滑的摆动
+            const time = clock.getElapsedTime();
+            quokkaModel.rotation.y = Math.sin(time * 0.5) * 0.1;  // 左右轻微摆动
+            quokkaModel.position.y = Math.sin(time * 2) * 0.1;    // 上下轻微浮动
+        }
+        
+        renderer.render(scene, camera);
+    }
+    animate();
+}
+
+// 情感判断模块
+function checkMood(text) {
+    // 开心相关的动画：dance, dance2, Happy_jump, happy
+    if (/开心|高兴|快乐|好玩|有趣|棒|好|哈哈|嘻嘻|跳舞|跳起来|舞蹈/.test(text)) {
+        return 'happy';
+    }
+    
+    // 困惑相关的动画：confused
+    if (/困惑|不懂|为什么|怎么会|奇怪|搞不懂|疑惑|迷惑/.test(text)) {
+        return 'confused';
+    }
+    
+    // 懒散相关的动画：lazy
+    if (/累了|困了|好累|好困|懒|不想动|休息/.test(text)) {
+        return 'lazy';
+    }
+    
+    // 站立相关的动画：stand
+    if (/站|立|停|等|不动/.test(text)) {
+        return 'stand';
+    }
+    
+    // 难过相关：触发confused或lazy动画
+    if (/难过|伤心|不开心|不高兴|糟糕|坏|不好|呜呜|哭/.test(text)) {
+        return 'sad';
+    }
+    
+    // 默认走路动画：walking
+    return 'normal';
+}
+
+// 更新情感反馈函数
+function updateMood(mood) {
+    if (!quokkaModel || !quokkaModel.actions) return;
+    
+    const { walk, confused, dance, dance2, jump, happy, lazy, stand } = quokkaModel.actions;
+    
+    // 淡出所有动画
+    Object.values(quokkaModel.actions).forEach(action => {
+        action.fadeOut(0.5);
+    });
+    
+    switch(mood) {
+        case 'happy':
+            // 随机选择一个开心的动画
+            const happyActions = [dance, dance2, jump, happy];
+            const randomAction = happyActions[Math.floor(Math.random() * happyActions.length)];
+            randomAction.reset().fadeIn(0.3).play();
+            
+            setTimeout(() => {
+                randomAction.fadeOut(0.3);
+                stand.reset().fadeIn(0.3).play();
+            }, 3000);
+            break;
+            
+        case 'confused':
+            confused.reset().fadeIn(0.3).play();
+            setTimeout(() => {
+                confused.fadeOut(0.3);
+                stand.reset().fadeIn(0.3).play();
+            }, 3000);
+            break;
+            
+        case 'lazy':
+            lazy.reset().fadeIn(0.3).play();
+            setTimeout(() => {
+                lazy.fadeOut(0.3);
+                stand.reset().fadeIn(0.3).play();
+            }, 4000);
+            break;
+            
+        case 'stand':
+            stand.reset().fadeIn(0.3).play();
+            break;
+            
+        case 'sad':
+            // 播放困惑或懒散动画
+            const sadAction = Math.random() > 0.5 ? lazy : confused;
+            sadAction.reset().fadeIn(0.3).play();
+            
+            setTimeout(() => {
+                sadAction.fadeOut(0.3);
+                stand.reset().fadeIn(0.3).play();
+            }, 3000);
+            break;
+            
+        default:
+            stand.reset().fadeIn(0.3).play();
+    }
+}
+
+// 初始化语音识别
+function initSpeechRecognition() {
+    const recognition = new webkitSpeechRecognition();
+    recognition.lang = 'zh-CN';
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    
+    recognition.onstart = () => {
+        document.getElementById('voiceStatus').textContent = '正在录音...';
+        document.getElementById('voiceStatus').style.color = '#ff4444';
+    };
+    
+    recognition.onresult = (e) => {
+        const text = e.results[0][0].transcript;
+        document.getElementById('voiceStatus').textContent = `识别结果: ${text}`;
+        const mood = checkMood(text);
+        
+        // 更新3D模型动画
+        updateMood(mood);
+        
+        // 2D表情反馈
+        const quokkaEmoji = document.getElementById('quokka');
+        quokkaEmoji.style.transition = 'all 0.5s';
+        if(mood === 'happy') {
+            quokkaEmoji.style.transform = 'translateY(-20px)';
+            quokkaEmoji.textContent = '🐨↑';
+        } else if(mood === 'sad') {
+            quokkaEmoji.style.transform = 'scale(0.8)';
+            quokkaEmoji.textContent = '🐨↓';
+        }
+    };
+    
+    recognition.onend = () => {
+        if (isRecording) {
+            recognition.start();
+        } else {
+            document.getElementById('voiceStatus').textContent = '按住空格键说话';
+            document.getElementById('voiceStatus').style.color = '#666';
+        }
+    };
+    
+    recognition.onerror = (event) => {
+        document.getElementById('voiceStatus').textContent = '语音识别错误，请重试';
+        document.getElementById('voiceStatus').style.color = '#ff4444';
+        isRecording = false;
+    };
+    
+    return recognition;
+}
+
+// 开始录音
+function startRecording() {
+    if (!recognition) {
+        recognition = initSpeechRecognition();
+    }
+    isRecording = true;
+    recognition.start();
+}
+
+// 停止录音
+function stopRecording() {
+    if (recognition && isRecording) {
+        isRecording = false;
+        recognition.stop();
+    }
+}
+
+// 添加键盘事件监听
+document.addEventListener('keydown', (event) => {
+    if (event.code === 'Space' && !isRecording && !event.repeat) {
+        event.preventDefault();  // 防止页面滚动
+        startRecording();
+    }
+});
+
+document.addEventListener('keyup', (event) => {
+    if (event.code === 'Space' && isRecording) {
+        event.preventDefault();
+        stopRecording();
+    }
+});
+
+// 页面加载完成后初始化3D场景
+window.onload = init3DScene;
+</script>
+</body>
+</html>

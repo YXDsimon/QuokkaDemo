@@ -273,19 +273,25 @@ function updateMood(mood) {
 // 初始化语音识别
 function initSpeechRecognition() {
     const recognition = new webkitSpeechRecognition();
+    console.log('initSpeechRecognition');
     recognition.lang = 'zh-CN';
     recognition.continuous = false;
     recognition.interimResults = false;
     
     recognition.onstart = () => {
+        console.log('onstart');
         document.getElementById('voiceStatus').textContent = '正在录音...';
         document.getElementById('voiceStatus').style.color = '#ff4444';
     };
     
     recognition.onresult = (e) => {
+        console.log('onresult');
         const text = e.results[0][0].transcript;
         document.getElementById('voiceStatus').textContent = `识别结果: ${text}`;
         const mood = checkMood(text);
+        
+        // Print the detected mood to the console
+        console.log(`Detected mood: ${mood}`);
         
         // 更新3D模型动画
         updateMood(mood);
@@ -325,30 +331,44 @@ function startRecording() {
     if (!recognition) {
         recognition = initSpeechRecognition();
     }
+    console.log('Starting recording, setting isRecording to true');
     isRecording = true;
     recognition.start();
 }
 
 // 停止录音
 function stopRecording() {
+    console.log('Inside stopRecording function, isRecording =', isRecording);
     if (recognition && isRecording) {
         isRecording = false;
+        console.log('Stopping recording, setting isRecording to false');
         recognition.stop();
+    } else {
+        console.log('Not stopping recording because conditions not met');
     }
 }
 
 // 添加键盘事件监听
 document.addEventListener('keydown', (event) => {
+    console.log('Key down event:', event.code, 'isRecording =', isRecording);
     if (event.code === 'Space' && !isRecording && !event.repeat) {
+        console.log('Space bar pressed');
         event.preventDefault();  // 防止页面滚动
         startRecording();
     }
 });
 
 document.addEventListener('keyup', (event) => {
-    if (event.code === 'Space' && isRecording) {
+    console.log('Key up event:', event.code, 'isRecording =', isRecording);
+    if (event.code === 'Space') {
+        console.log('Space bar released');
         event.preventDefault();
-        stopRecording();
+        // 无论 isRecording 状态如何，都尝试停止录音
+        if (recognition) {
+            console.log('Forcing recognition to stop');
+            isRecording = false;
+            recognition.stop();
+        }
     }
 });
 
